@@ -6,10 +6,10 @@ from unittest.mock import patch
 import httpx
 import numpy as np
 from pydantic import ValidationError
-from shapely.geometry import box
+from shapely.geometry import Polygon, box
 
 from snowmap.api import ManualWeather, SnowRequest, Tile, calculate, index
-from snowmap.model import estimate
+from snowmap.model import estimate, polygon_effects, polygon_faces
 from snowmap.sources import OVERPASS_URLS, Building, OverpassError, fetch_overpass, demo_tile, parse_buildings, projection, weather, weather_cache
 
 
@@ -49,6 +49,34 @@ class SnowTest(unittest.TestCase):
     def test_no_new_snow(self):
         response = calculate(SnowRequest(manual_weather=ManualWeather(snowfall_cm_h=0)))
         self.assertEqual(response["max_snow_depth_cm"], 0)
+
+    def test_live_foam_uses_tile_field_without_templates(self):
+        def field(buildings, width, height, rows, cols, direction, speed):
+            self.assertEqual(len(buildings), 4)
+            self.assertEqual((direction, speed), (270, 8))
+            return np.full((rows, cols), 0.4), {"iterations": 120}
+
+        request = SnowRequest(run_foam=True, hours=1, resolution=24)
+        with (
+            patch("snowmap.model.solve_tile", side_effect=field) as solve,
+            patch("snowmap.model.kernels", side_effect=AssertionError("Live run must bypass templates")),
+            patch("snowmap.model.rectangle", side_effect=AssertionError("Live run must use polygon faces")),
+        ):
+            result = calculate(request)
+        solve.assert_called_once()
+        self.assertEqual(result["model"], "openfoam_tile")
+        self.assertEqual(result["foam_run"], {"iterations": 120})
+        baseline = calculate(request.model_copy(update={"run_foam": False, "use_foam": False}))
+        self.assertNotEqual(result["snow_depth_cm"], baseline["snow_depth_cm"])
+
+    def test_polygon_wake_starts_at_recessed_leeward_facade(self):
+        building = Polygon([(0, 0), (30, 0), (30, 5), (5, 5), (5, 30), (0, 30)])
+        x, y = np.array([21.0]), np.array([24.0])
+        east, north = np.array([1, 0]), np.array([0, 1])
+        wake, _ = polygon_effects(polygon_faces(building), 10, x, y, east, north)
+        rectangle_wake, _ = polygon_effects(polygon_faces(building.envelope), 10, x, y, east, north)
+        self.assertAlmostEqual(wake[0], 0.95)
+        self.assertEqual(rectangle_wake[0], 0.0)
 
     def test_overpass_switches_provider_after_rate_limit(self):
         responses = [

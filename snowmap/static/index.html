@@ -101,6 +101,7 @@ body.map-mode{overflow:hidden}
         </fieldset>
         <label>Длительность, ч<input id="hours" type="number" min="1" max="24" value="3" required></label>
         <label class="check"><input id="foam" type="checkbox" checked> Шаблоны OpenFOAM</label>
+        <label id="liveFoamChoice" class="check"><input id="liveFoam" type="checkbox"> Рассчитать поток в OpenFOAM</label>
         <label id="snowChoice" class="check" hidden><input id="showSnow" type="checkbox" checked> Слой снега</label>
         <label id="snowScaleChoice" hidden>Максимум шкалы, см
           <input id="snowScale" type="number" min="0.1" step="any" value="30">
@@ -164,8 +165,12 @@ function updateFields() {
   $('tile').hidden = mode !== 'osm';
   $('forecastChoice').hidden = mode === 'demo';
   $('tile').querySelectorAll('input').forEach(input => input.disabled = mode !== 'osm');
+  if (mode === 'osm' && $('liveFoam').checked) $('forecast').checked = false;
   $('manual').hidden = $('manual').disabled = mode !== 'demo' && $('forecast').checked;
   for (const id of ['map', 'north', 'stats', 'forecastDetails', 'readout']) $(id).hidden = interactive;
+  $('liveFoamChoice').hidden = interactive;
+  $('liveFoam').disabled = $('liveFoamChoice').hidden;
+  $('foam').disabled = !$('liveFoam').disabled && $('liveFoam').checked;
   $('wind').hidden = true;
   $('streetMap').hidden = $('snowChoice').hidden = $('snowScaleChoice').hidden = !interactive;
   $('snowScale').disabled = !interactive;
@@ -203,7 +208,8 @@ function draw(data) {
     ctx.fill('evenodd');
     ctx.stroke();
   }
-  $('method').textContent = data.model === 'analytic' ? 'Аналитическая оценка' :
+  $('method').textContent = data.model === 'openfoam_tile' ?
+    'OpenFOAM · расчёт тайла' : data.model === 'analytic' ? 'Аналитическая оценка' :
     'OpenFOAM + модель снега · ' + Math.round(100*data.cfd_coverage) + '% применений';
   $('maximum').textContent = fmt.format(data.max_snow_depth_cm) + ' см';
   $('background').textContent = fmt.format(data.forecast_snowfall_cm) + ' см';
@@ -244,6 +250,7 @@ canvas.addEventListener('pointermove', event => {
 });
 function parameters() {
   const payload = {hours:number('hours'),use_foam:$('foam').checked};
+  if (!$('liveFoam').disabled && $('liveFoam').checked) payload.run_foam = true;
   if (!$('manual').hidden) {
     payload.manual_weather = {wind_from_deg:number('angle'),wind_speed_ms:number('speed'),snowfall_cm_h:number('snow')};
   }
@@ -376,9 +383,15 @@ $('settingsToggle').addEventListener('click', () => {
 });
 $('source').addEventListener('change', () => {
   updateFields();
+  if ($('liveFoam').checked && !$('liveFoam').disabled) {
+    $('status').textContent = 'Задайте параметры и нажмите «Рассчитать».';
+    return;
+  }
   $('form').requestSubmit();
 });
+$('liveFoam').addEventListener('change', updateFields);
 $('forecast').addEventListener('change', () => {
+  if ($('source').value === 'osm' && $('forecast').checked) $('liveFoam').checked = false;
   updateFields();
   if ($('source').value === 'map') $('form').requestSubmit();
 });
@@ -400,7 +413,8 @@ $('form').addEventListener('submit', async event => {
   const version = ++screenVersion;
   const mode = $('source').value;
   const payload = parameters();
-  $('status').textContent = 'Выполняется расчёт…';
+  $('status').textContent = payload.run_foam ?
+    'OpenFOAM рассчитывает поток для тайла…' : 'Выполняется расчёт…';
   try {
     if (mode === 'map') {
       await loadLeaflet();
@@ -424,7 +438,7 @@ $('form').addEventListener('submit', async event => {
     if (version !== screenVersion || $('source').value !== mode) return;
     result = data;
     draw(data);
-    $('status').textContent = data.kernels_available === 0 && payload.use_foam ?
+    $('status').textContent = data.kernels_available === 0 && payload.use_foam && !payload.run_foam ?
       'Шаблоны OpenFOAM отсутствуют. Показана аналитическая оценка.' : 'Карта обновлена.';
   } catch (error) {
     if (version === screenVersion && $('source').value === mode) $('status').textContent = error.message;

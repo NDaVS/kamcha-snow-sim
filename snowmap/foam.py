@@ -68,6 +68,10 @@ def mesh(case, height, angle):
 def setup(case, height, angle, iterations):
     mesh(case, height, angle)
     u, v = (REFERENCE_SPEED*f(math.radians(angle)) for f in (math.cos, math.sin))
+    setup_fields(case, u, v, iterations)
+
+
+def setup_fields(case, u, v, iterations):
     velocity = f"({u:.9f} {v:.9f} 0)"
     fields = {
         "U": ("0 1 -1", velocity, f"fixedValue; value uniform {velocity};",
@@ -151,8 +155,7 @@ def vectors(path):
     return values
 
 
-def generate(height, angle, iterations, bashrc, output):
-    started = time.perf_counter()
+def run_foam(case, bashrc, *command, timeout=900):
     load_environment = """
 ulimit -c 0
 foam_env=$1
@@ -160,21 +163,31 @@ shift
 load_foam() { source "$foam_env"; }
 load_foam && exec "$@"
 """
+    result = subprocess.run(
+        ["bash", "-c", load_environment, "foam", str(bashrc), *command, "-case", str(case)],
+        cwd=case, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout,
+    )
+    if result.returncode:
+        raise RuntimeError(f"{command[0]} failed ({result.returncode}):\n{result.stdout[-5000:]}")
+    return result.stdout
+
+
+def solve_flow(case, bashrc, *, timeout=900):
+    output = run_foam(case, bashrc, "simpleFoam", timeout=timeout)
+    residuals = [float(value) for value in re.findall(r"Initial residual = ([^,]+)", output)[-6:]]
+    if not residuals or any(not math.isfinite(value) for value in residuals):
+        raise RuntimeError("simpleFoam did not produce finite final residuals")
+    run_foam(case, bashrc, "postProcess", "-func", "writeCellCentres", "-latestTime")
+    return max(residuals)
+
+
+def generate(height, angle, iterations, bashrc, output):
+    started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="snow-foam-") as temp:
         case = Path(temp)
         setup(case, height, angle, iterations)
-        for command in ("blockMesh", "simpleFoam", "postProcess -func writeCellCentres -latestTime"):
-            result = subprocess.run(
-                ["bash", "-c", load_environment,
-                 "foam", str(bashrc), *command.split(), "-case", str(case)],
-                cwd=case, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=900,
-            )
-            if result.returncode:
-                raise RuntimeError(f"{command} failed ({result.returncode}):\n{result.stdout[-5000:]}")
-            if command == "simpleFoam":
-                residuals = [float(value) for value in re.findall(r"Initial residual = ([^,]+)", result.stdout)[-6:]]
-                if not residuals or any(not math.isfinite(value) for value in residuals):
-                    raise RuntimeError("simpleFoam did not produce finite final residuals")
+        run_foam(case, bashrc, "blockMesh")
+        residual = solve_flow(case, bashrc)
         final = case / str(iterations)
         grid_size = 2*SIZE//STEP
         grid = [[None]*grid_size for _ in range(grid_size)]
@@ -189,11 +202,11 @@ load_foam && exec "$@"
             raise RuntimeError("Incomplete sampling of the near-ground layer")
         output.mkdir(exist_ok=True, parents=True)
         data = {"version": 1, "height": height, "angle": angle, "iterations": iterations,
-                "max_final_initial_residual": max(residuals), "speed_ratio": grid}
+                "max_final_initial_residual": residual, "speed_ratio": grid}
         with tempfile.NamedTemporaryFile(mode="w", dir=output, delete=False) as stream:
             json.dump(data, stream, allow_nan=False)
         Path(stream.name).replace(output / f"h{height}-a{angle}.json")
-        print(f"{height=} {angle=} {time.perf_counter()-started:.2f}s residual={max(residuals):.4g}", flush=True)
+        print(f"{height=} {angle=} {time.perf_counter()-started:.2f}s residual={residual:.4g}", flush=True)
 
 
 def main():

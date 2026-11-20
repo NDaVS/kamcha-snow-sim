@@ -1,4 +1,6 @@
 import logging
+import subprocess
+from threading import BoundedSemaphore
 import time
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from .sources import OverpassError, demo_tile, osm_buildings, tile_bounds, weath
 
 app = FastAPI(title="Карта снежных заносов", version="0.1.0")
 log = logging.getLogger(__name__)
+foam_slot = BoundedSemaphore(1)
 
 
 class Tile(BaseModel):
@@ -40,6 +43,13 @@ class SnowRequest(BaseModel):
     resolution: int = Field(default=120, ge=24, le=240)
     use_foam: bool = True
     city_cache_only: bool = False
+    run_foam: bool = False
+
+    @model_validator(mode="after")
+    def validate_foam_weather(self):
+        if self.run_foam and self.tile is not None and self.manual_weather is None:
+            raise ValueError("Для расчёта тайла в OpenFOAM задайте погоду вручную")
+        return self
 
 
 @app.get("/", include_in_schema=False)
@@ -89,7 +99,22 @@ def calculate(request: SnowRequest):
         weather_source = "Open-Meteo"
 
     calc_start = time.perf_counter()
-    result = estimate(bounds, buildings, hourly, request.resolution, request.use_foam)
+    if request.run_foam:
+        if not foam_slot.acquire(blocking=False):
+            raise HTTPException(429, "OpenFOAM уже рассчитывает другой тайл")
+        try:
+            result = estimate(bounds, buildings, hourly, request.resolution,
+                              request.use_foam, run_foam=True)
+        except subprocess.TimeoutExpired as error:
+            log.warning("OpenFOAM timed out for tile %s", tile)
+            raise HTTPException(504, "Истекло время ожидания OpenFOAM") from error
+        except (OSError, RuntimeError, ValueError) as error:
+            log.warning("OpenFOAM failed for tile %s: %s", tile, error)
+            raise HTTPException(503, "OpenFOAM не завершил расчёт. Подробности в журнале сервера.") from error
+        finally:
+            foam_slot.release()
+    else:
+        result = estimate(bounds, buildings, hourly, request.resolution, request.use_foam)
     end = time.perf_counter()
     return {
         "tile": dict(zip(("z", "x", "y"), tile)),
