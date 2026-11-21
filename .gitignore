@@ -4,3 +4,20 @@ __pycache__/
 
 /.git-kamcha/
 /tile_*.png
+
+.DS_Store
+.env
+/out/
+/city_sim/.state/
+/city_sim/data/building-location-checks.json.gz
+/weather_coverage/coordinates.geojson
+/weather_coverage/observations.csv
+/weather_coverage/weather_coverage.html
+/weather_coverage/heatmaps/*
+!/weather_coverage/heatmaps/history/
+/weather_coverage/heatmaps/history/*
+!/weather_coverage/heatmaps/history/historical_frames.csv
+/winter_audit/output/
+/prototype/results/
+/research/*/sources/
+/research/*/results/

@@ -1,0 +1,99 @@
+{
+  "graph_version": "osm-1143744836afc553-demo-v1",
+  "crs": "WGS84 [lon, lat]",
+  "layers": [
+    {
+      "name": "Дорожные дуги",
+      "path": "geo/road_network_enriched.geojson",
+      "color": "#53697D",
+      "id": "edge_id"
+    },
+    {
+      "name": "Оценка уклонов DSM",
+      "path": "geo/road_slopes.geojson",
+      "id": "edge_id",
+      "filter": {
+        "quality": "dsm_proxy"
+      },
+      "field": "mean_grade_pct",
+      "signedStops": [
+        [
+          -12,
+          "#702B78"
+        ],
+        [
+          0,
+          "#BDC9D4"
+        ],
+        [
+          12,
+          "#A53C18"
+        ]
+      ]
+    },
+    {
+      "name": "Исходные OSM-теги ограничений",
+      "path": "geo/road_restrictions.geojson",
+      "color": "#756041",
+      "status": "mapped_unverified"
+    },
+    {
+      "name": "Потенциальные дорожные проблемы",
+      "path": "geo/data_quality_flags.geojson",
+      "color": "#DA7A23",
+      "field": "flags"
+    },
+    {
+      "name": "Ширина отсутствует в OSM",
+      "path": "geo/data_quality_flags.geojson",
+      "color": "#8E5C39",
+      "arrayContains": {
+        "flags": "missing_osm_width"
+      }
+    },
+    {
+      "name": "Оценочно сложные уклоны",
+      "path": "geo/data_quality_flags.geojson",
+      "color": "#9A3665",
+      "arrayContains": {
+        "flags": "dsm_grade_review"
+      }
+    },
+    {
+      "name": "Границы дорожных перечней требуют сверки",
+      "path": "geo/responsibility_segments.geojson",
+      "color": "#7865BD",
+      "dash": [
+        5,
+        3
+      ],
+      "status": "derived_candidate"
+    },
+    {
+      "name": "Неизвестная зимняя ответственность",
+      "path": "geo/road_network_enriched.geojson",
+      "color": "#7B8795",
+      "filter": {
+        "responsibility_status": "unknown"
+      }
+    },
+    {
+      "name": "Объекты инфраструктуры",
+      "path": "geo/infrastructure_objects.geojson",
+      "color": "#087F78",
+      "id": "object_id"
+    },
+    {
+      "name": "Пешеходные связи OSM",
+      "path": "geo/pedestrian_connections.geojson",
+      "color": "#087F78",
+      "id": "connection_id"
+    }
+  ],
+  "unavailable": [
+    "confirmed_zones",
+    "disputed_boundaries",
+    "applicable_deadlines",
+    "confirmed_interagency_breaks"
+  ]
+}
