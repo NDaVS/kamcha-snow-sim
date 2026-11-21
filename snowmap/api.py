@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .model import estimate
 from .city_cache import CityCacheUnavailable
+from .clearance import osm_project, points
 from .sources import OverpassError, demo_tile, osm_buildings, tile_bounds, weather
 
 app = FastAPI(title="Карта снежных заносов", version="0.1.0")
@@ -55,6 +56,24 @@ class SnowRequest(BaseModel):
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(Path(__file__).parent/"static"/"index.html")
+
+
+@app.get("/clearance/points")
+def clearance_points():
+    return points()
+
+
+@app.get("/clearance/map.js", include_in_schema=False)
+def clearance_script():
+    return FileResponse(Path(__file__).parent / "static/clearance_map.js", media_type="text/javascript")
+
+
+@app.get("/clearance/vendor/{asset}", include_in_schema=False)
+def leaflet_asset(asset: str):
+    vendor = osm_project() / "shared/snowsite/apps/web/vendor"
+    if asset not in ("leaflet.js", "leaflet.css") or not (vendor / asset).is_file():
+        raise HTTPException(404)
+    return FileResponse(vendor / asset)
 
 
 @app.post("/api/snow")

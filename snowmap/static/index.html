@@ -299,29 +299,43 @@ function paintSnowTile(tile, data, coords) {
   }));
 }
 
+function loadLeafletAssets(base, cssIntegrity) {
+  const css = document.createElement('link');
+  css.rel = 'stylesheet';
+  css.href = base + 'leaflet.css';
+  css.integrity = cssIntegrity;
+  css.crossOrigin = '';
+  const script = document.createElement('script');
+  script.src = base + 'leaflet.js';
+  script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+  script.crossOrigin = '';
+  return Promise.all([css, script].map(asset => new Promise((resolve, reject) => {
+    asset.onload = resolve;
+    asset.onerror = () => reject(new Error('Не удалось загрузить Leaflet'));
+    document.head.append(asset);
+  }))).catch(error => {
+    css.remove();
+    script.remove();
+    throw error;
+  });
+}
+
 function loadLeaflet() {
   if (!leafletPromise) {
-    const css = document.createElement('link');
-    css.rel = 'stylesheet';
-    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    css.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-    css.crossOrigin = '';
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
-    script.crossOrigin = '';
-    leafletPromise = Promise.all([css, script].map(asset => new Promise((resolve, reject) => {
-      asset.onload = resolve;
-      asset.onerror = () => reject(new Error('Не удалось загрузить Leaflet'));
-      document.head.append(asset);
-    }))).catch(error => {
-      css.remove();
-      script.remove();
-      leafletPromise = undefined;
-      throw error;
-    });
+    leafletPromise = loadLeafletAssets('/clearance/vendor/',
+      'sha256-M3v8pcq9A7OYFbJwD+vis7ft9VkhxZzUn4jssyghIwM=')
+      .catch(() => loadLeafletAssets('https://unpkg.com/leaflet@1.9.4/dist/',
+        'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='))
+      .catch(error => {
+        leafletPromise = undefined;
+        throw error;
+      });
   }
   return leafletPromise;
+}
+
+function clearanceChanged() {
+  window.dispatchEvent(new Event('clearancechange'));
 }
 
 function createStreetMap() {
@@ -349,6 +363,7 @@ function createStreetMap() {
           if (data) {
             paintSnowTile(tile, data, coords);
             snowTiles.set(tile, {data, coords});
+            clearanceChanged();
           }
           done(null, tile);
         } catch (error) {
@@ -364,7 +379,7 @@ function createStreetMap() {
   });
   let lastError;
   snowLayer.on('tileunload', ({tile}) => {
-    snowTiles.delete(tile);
+    if (snowTiles.delete(tile)) clearanceChanged();
     tile.snowRequest.abort();
     processQueue();
   });
@@ -407,7 +422,9 @@ $('snowScale').addEventListener('input', () => {
 $('snowScale').addEventListener('blur', () => {
   $('snowScale').value = snowScale;
 });
-$('showSnow').addEventListener('change', () => $('form').requestSubmit());
+$('showSnow').addEventListener('change', () => {
+  snowLayer?.setOpacity($('showSnow').checked ? 1 : 0);
+});
 $('form').addEventListener('submit', async event => {
   event.preventDefault();
   const version = ++screenVersion;
@@ -423,14 +440,13 @@ $('form').addEventListener('submit', async event => {
       map.invalidateSize({pan:false});
       snowParams = payload;
       $('attribution').textContent = $('forecast').checked ? 'Прогноз Open-Meteo' : '';
-      if (!$('showSnow').checked) {
-        snowLayer.remove();
-        $('status').textContent = 'Слой снега скрыт.';
-      } else if (map.hasLayer(snowLayer)) {
+      snowLayer.setOpacity($('showSnow').checked ? 1 : 0);
+      if (map.hasLayer(snowLayer)) {
         snowLayer.redraw();
       } else {
         snowLayer.addTo(map);
       }
+      clearanceChanged();
       return;
     }
     if (mode === 'osm') payload.tile = {z:number('z'),x:number('x'),y:number('y')};
@@ -447,5 +463,6 @@ $('form').addEventListener('submit', async event => {
 updateFields();
 $('form').requestSubmit();
 </script>
+<script src="/clearance/map.js"></script>
 </body>
 </html>
